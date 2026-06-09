@@ -3,21 +3,23 @@ using System.ComponentModel.DataAnnotations.Schema;
 
 namespace AppReservasAPI.Models
 {
-    [Table("TiposViaje", Schema = "viajes")]
-    public class TipoViaje
+    [Table("MetodosPago", Schema = "viajes")]
+    public class MetodoPago
     {
         [Key]
-        public int TipoViajeId { get; set; }
+        public int MetodoPagoId { get; set; }
 
         [Required]
-        [StringLength(200)]
+        [StringLength(100)]
         public string Nombre { get; set; } = string.Empty;
 
-        [StringLength(600)]
+        [StringLength(510)]
         public string? Descripcion { get; set; }
 
         public bool Activo { get; set; }
 
-        public ICollection<Viaje> Viajes { get; set; } = new List<Viaje>();
+        public DateTime FechaCreacion { get; set; }
+
+        public ICollection<Pago> Pagos { get; set; } = new List<Pago>();
     }
 }

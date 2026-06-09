@@ -3,20 +3,21 @@ using System.ComponentModel.DataAnnotations.Schema;
 
 namespace AppReservasAPI.Models
 {
-    [Table("TiposViaje", Schema = "viajes")]
-    public class TipoViaje
+    [Table("Destinos", Schema = "viajes")]
+    public class Destino
     {
         [Key]
-        public int TipoViajeId { get; set; }
+        public int DestinoId { get; set; }
 
-        [Required]
-        [StringLength(200)]
-        public string Nombre { get; set; } = string.Empty;
-
-        [StringLength(600)]
+        [StringLength(1000)]
         public string? Descripcion { get; set; }
 
         public bool Activo { get; set; }
+
+        public int CiudadId { get; set; }
+
+        [ForeignKey(nameof(CiudadId))]
+        public Ciudad? Ciudad { get; set; }
 
         public ICollection<Viaje> Viajes { get; set; } = new List<Viaje>();
     }

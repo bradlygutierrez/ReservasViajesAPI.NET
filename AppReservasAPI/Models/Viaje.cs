@@ -13,11 +13,15 @@ namespace AppReservasAPI.Models
 
         public int DestinoId { get; set; }
 
+        [Required]
+        [StringLength(300)]
         public string Titulo { get; set; } = string.Empty;
 
-        public string Descripcion { get; set; } = string.Empty;
+        [StringLength(2000)]
+        public string? Descripcion { get; set; }
 
-        public float Precio { get; set; }
+        [Column(TypeName = "decimal(10,2)")]
+        public decimal Precio { get; set; }
 
         public int CuposTotales { get; set; }
 
@@ -25,13 +29,14 @@ namespace AppReservasAPI.Models
 
         public DateTime FechaCreacion { get; set; }
 
-        [ForeignKey(nameof(ViajeId))]
 
-        public TIpoVIaje? TipoViaje { get; set; }
+        [ForeignKey(nameof(TipoViajeId))]
+        public TipoViaje? TipoViaje { get; set; }
 
         [ForeignKey(nameof(DestinoId))]
+        public Destino? Destino { get; set; }
 
-        public Destinos? Destino { get; set; }
 
+        public ICollection<Disponibilidad> Disponibilidades { get; set; } = new List<Disponibilidad>();
     }
 }
