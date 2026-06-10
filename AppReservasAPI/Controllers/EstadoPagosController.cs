@@ -1,101 +1,253 @@
 using AppReservasAPI.Context;
+using AppReservasAPI.DTOs.EstadosPago;
 using AppReservasAPI.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
-[Route("api/[controller]")]
-[ApiController]
-[Authorize(Roles = "Administrador")]
-public class EstadoPagosController : ControllerBase
+namespace AppReservasAPI.Controllers
 {
-    private readonly AppDbContext _context;
-    public EstadoPagosController(AppDbContext context)
+    [Route("api/[controller]")]
+    [ApiController]
+    [Authorize]
+    public class EstadosPagoController : ControllerBase
     {
-        _context = context;
-    }
+        private readonly AppDbContext _context;
 
-    // GET: api/EstadoPago
-    [HttpGet]
-    public async Task<ActionResult<IEnumerable<EstadoPago>>> GetEstadoPago()
-    {
-        return await _context.EstadosPago.ToListAsync();
-    }
-
-    // GET: api/EstadoPago/5
-    [HttpGet("{estadopagoid}")]
-    public async Task<ActionResult<EstadoPago>> GetEstadoPago(int estadopagoid)
-    {
-        var estadopago = await _context.EstadosPago.FindAsync(estadopagoid);
-
-        if (estadopago == null)
+        public EstadosPagoController(AppDbContext context)
         {
-            return NotFound();
+            _context = context;
         }
 
-        return estadopago;
-    }
-
-    // PUT: api/EstadoPago/5
-    // To protect from overposting attacks, see https://go.microsoft.com/fwlink/?linkid=2123754
-    [HttpPut("{estadopagoid}")]
-    public async Task<IActionResult> PutEstadoPago(int? estadopagoid, EstadoPago estadopago)
-    {
-        if (estadopagoid != estadopago.EstadoPagoId)
+        // GET: api/EstadosPago
+        [HttpGet]
+        public async Task<IActionResult> GetEstadosPago(
+            [FromQuery] bool? activo,
+            [FromQuery] string? busqueda)
         {
-            return BadRequest();
+            var query = _context.EstadosPago
+                .AsNoTracking()
+                .AsQueryable();
+
+            if (activo.HasValue)
+            {
+                query = query.Where(e => e.Activo == activo.Value);
+            }
+
+            if (!string.IsNullOrWhiteSpace(busqueda))
+            {
+                var texto = busqueda.Trim();
+
+                query = query.Where(e =>
+                    e.Nombre.Contains(texto) ||
+                    (e.Descripcion != null && e.Descripcion.Contains(texto)));
+            }
+
+            var estados = await query
+                .Select(e => new
+                {
+                    e.EstadoPagoId,
+                    e.Nombre,
+                    e.Descripcion,
+                    e.Activo,
+                    e.FechaCreacion,
+                    PagosAsociados = e.Pagos.Count()
+                })
+                .OrderBy(e => e.Nombre)
+                .ToListAsync();
+
+            return Ok(estados);
         }
 
-        _context.Entry(estadopago).State = EntityState.Modified;
-
-        try
+        // GET: api/EstadosPago/5
+        [HttpGet("{estadoPagoId:int}")]
+        public async Task<IActionResult> GetEstadoPago(int estadoPagoId)
         {
+            var estado = await _context.EstadosPago
+                .AsNoTracking()
+                .Where(e => e.EstadoPagoId == estadoPagoId)
+                .Select(e => new
+                {
+                    e.EstadoPagoId,
+                    e.Nombre,
+                    e.Descripcion,
+                    e.Activo,
+                    e.FechaCreacion,
+                    Pagos = e.Pagos.Select(p => new
+                    {
+                        p.PagoId,
+                        p.ReservaId,
+                        p.Monto,
+                        p.Referencia,
+                        p.FechaPago,
+                        MetodoPago = p.MetodoPago == null ? null : p.MetodoPago.Nombre
+                    })
+                })
+                .FirstOrDefaultAsync();
+
+            if (estado == null)
+            {
+                return NotFound("El estado de pago no existe.");
+            }
+
+            return Ok(estado);
+        }
+
+        // POST: api/EstadosPago
+        [HttpPost]
+        [Authorize(Roles = "Administrador")]
+        public async Task<IActionResult> CrearEstadoPago([FromBody] CrearEstadoPagoDto dto)
+        {
+            if (!ModelState.IsValid)
+            {
+                return BadRequest(ModelState);
+            }
+
+            var nombre = dto.Nombre.Trim();
+
+            var nombreDuplicado = await _context.EstadosPago
+                .AnyAsync(e => e.Nombre == nombre);
+
+            if (nombreDuplicado)
+            {
+                return BadRequest("Ya existe un estado de pago con ese nombre.");
+            }
+
+            var estado = new EstadoPago
+            {
+                Nombre = nombre,
+                Descripcion = string.IsNullOrWhiteSpace(dto.Descripcion) ? null : dto.Descripcion.Trim(),
+                Activo = true,
+                FechaCreacion = DateTime.Now
+            };
+
+            _context.EstadosPago.Add(estado);
             await _context.SaveChangesAsync();
+
+            return CreatedAtAction(
+                nameof(GetEstadoPago),
+                new { estadoPagoId = estado.EstadoPagoId },
+                new
+                {
+                    estado.EstadoPagoId,
+                    estado.Nombre,
+                    estado.Descripcion,
+                    estado.Activo,
+                    estado.FechaCreacion
+                }
+            );
         }
-        catch (DbUpdateConcurrencyException)
+
+        // PUT: api/EstadosPago/5
+        [HttpPut("{estadoPagoId:int}")]
+        [Authorize(Roles = "Administrador")]
+        public async Task<IActionResult> ActualizarEstadoPago(int estadoPagoId, [FromBody] ActualizarEstadoPagoDto dto)
         {
-            if (!EstadoPagoExists(estadopagoid))
+            if (!ModelState.IsValid)
             {
-                return NotFound();
+                return BadRequest(ModelState);
             }
-            else
+
+            var estado = await _context.EstadosPago
+                .FirstOrDefaultAsync(e => e.EstadoPagoId == estadoPagoId);
+
+            if (estado == null)
             {
-                throw;
+                return NotFound("El estado de pago no existe.");
             }
+
+            var nombre = dto.Nombre.Trim();
+
+            var nombreDuplicado = await _context.EstadosPago
+                .AnyAsync(e => e.EstadoPagoId != estadoPagoId && e.Nombre == nombre);
+
+            if (nombreDuplicado)
+            {
+                return BadRequest("Ya existe otro estado de pago con ese nombre.");
+            }
+
+            estado.Nombre = nombre;
+            estado.Descripcion = string.IsNullOrWhiteSpace(dto.Descripcion) ? null : dto.Descripcion.Trim();
+            estado.Activo = dto.Activo;
+
+            await _context.SaveChangesAsync();
+
+            return Ok(new
+            {
+                estado.EstadoPagoId,
+                estado.Nombre,
+                estado.Descripcion,
+                estado.Activo,
+                estado.FechaCreacion
+            });
         }
 
-        return NoContent();
-    }
-
-    // POST: api/EstadoPago
-    // To protect from overposting attacks, see https://go.microsoft.com/fwlink/?linkid=2123754
-    [HttpPost]
-    public async Task<ActionResult<EstadoPago>> PostEstadoPago(EstadoPago estadopago)
-    {
-        _context.EstadosPago.Add(estadopago);
-        await _context.SaveChangesAsync();
-
-        return CreatedAtAction("GetEstadoPago", new { estadopagoid = estadopago.EstadoPagoId }, estadopago);
-    }
-
-    // DELETE: api/EstadoPago/5
-    [HttpDelete("{estadopagoid}")]
-    public async Task<IActionResult> DeleteEstadoPago(int? estadopagoid)
-    {
-        var estadopago = await _context.EstadosPago.FindAsync(estadopagoid);
-        if (estadopago == null)
+        // PUT: api/EstadosPago/5/activar
+        [HttpPut("{estadoPagoId:int}/activar")]
+        [Authorize(Roles = "Administrador")]
+        public async Task<IActionResult> ActivarEstadoPago(int estadoPagoId)
         {
-            return NotFound();
+            var estado = await _context.EstadosPago
+                .FirstOrDefaultAsync(e => e.EstadoPagoId == estadoPagoId);
+
+            if (estado == null)
+            {
+                return NotFound("El estado de pago no existe.");
+            }
+
+            estado.Activo = true;
+            await _context.SaveChangesAsync();
+
+            return Ok("Estado de pago activado correctamente.");
         }
 
-        _context.EstadosPago.Remove(estadopago);
-        await _context.SaveChangesAsync();
+        // PUT: api/EstadosPago/5/desactivar
+        [HttpPut("{estadoPagoId:int}/desactivar")]
+        [Authorize(Roles = "Administrador")]
+        public async Task<IActionResult> DesactivarEstadoPago(int estadoPagoId)
+        {
+            var estado = await _context.EstadosPago
+                .FirstOrDefaultAsync(e => e.EstadoPagoId == estadoPagoId);
 
-        return NoContent();
-    }
+            if (estado == null)
+            {
+                return NotFound("El estado de pago no existe.");
+            }
 
-    private bool EstadoPagoExists(int? estadopagoid)
-    {
-        return _context.EstadosPago.Any(e => e.EstadoPagoId == estadopagoid);
+            estado.Activo = false;
+            await _context.SaveChangesAsync();
+
+            return Ok("Estado de pago desactivado correctamente.");
+        }
+
+        // DELETE: api/EstadosPago/5
+        [HttpDelete("{estadoPagoId:int}")]
+        [Authorize(Roles = "Administrador")]
+        public async Task<IActionResult> DeleteEstadoPago(int estadoPagoId)
+        {
+            var estado = await _context.EstadosPago
+                .FirstOrDefaultAsync(e => e.EstadoPagoId == estadoPagoId);
+
+            if (estado == null)
+            {
+                return NotFound("El estado de pago no existe.");
+            }
+
+            var tienePagos = await _context.Pagos
+                .AnyAsync(p => p.EstadoPagoId == estadoPagoId);
+
+            if (tienePagos)
+            {
+                estado.Activo = false;
+                await _context.SaveChangesAsync();
+
+                return Ok("El estado de pago tiene pagos asociados. No se eliminó físicamente; fue desactivado.");
+            }
+
+            _context.EstadosPago.Remove(estado);
+            await _context.SaveChangesAsync();
+
+            return NoContent();
+        }
     }
 }

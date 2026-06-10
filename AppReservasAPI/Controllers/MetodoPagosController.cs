@@ -1,101 +1,253 @@
 using AppReservasAPI.Context;
+using AppReservasAPI.DTOs.MetodosPago;
 using AppReservasAPI.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
-[Route("api/[controller]")]
-[ApiController]
-[Authorize(Roles = "Administrador")]
-public class MetodoPagosController : ControllerBase
+namespace AppReservasAPI.Controllers
 {
-    private readonly AppDbContext _context;
-    public MetodoPagosController(AppDbContext context)
+    [Route("api/[controller]")]
+    [ApiController]
+    [Authorize]
+    public class MetodosPagoController : ControllerBase
     {
-        _context = context;
-    }
+        private readonly AppDbContext _context;
 
-    // GET: api/MetodoPago
-    [HttpGet]
-    public async Task<ActionResult<IEnumerable<MetodoPago>>> GetMetodoPago()
-    {
-        return await _context.MetodosPago.ToListAsync();
-    }
-
-    // GET: api/MetodoPago/5
-    [HttpGet("{metodopagoid}")]
-    public async Task<ActionResult<MetodoPago>> GetMetodoPago(int metodopagoid)
-    {
-        var metodopago = await _context.MetodosPago.FindAsync(metodopagoid);
-
-        if (metodopago == null)
+        public MetodosPagoController(AppDbContext context)
         {
-            return NotFound();
+            _context = context;
         }
 
-        return metodopago;
-    }
-
-    // PUT: api/MetodoPago/5
-    // To protect from overposting attacks, see https://go.microsoft.com/fwlink/?linkid=2123754
-    [HttpPut("{metodopagoid}")]
-    public async Task<IActionResult> PutMetodoPago(int? metodopagoid, MetodoPago metodopago)
-    {
-        if (metodopagoid != metodopago.MetodoPagoId)
+        // GET: api/MetodosPago
+        [HttpGet]
+        public async Task<IActionResult> GetMetodosPago(
+            [FromQuery] bool? activo,
+            [FromQuery] string? busqueda)
         {
-            return BadRequest();
+            var query = _context.MetodosPago
+                .AsNoTracking()
+                .AsQueryable();
+
+            if (activo.HasValue)
+            {
+                query = query.Where(m => m.Activo == activo.Value);
+            }
+
+            if (!string.IsNullOrWhiteSpace(busqueda))
+            {
+                var texto = busqueda.Trim();
+
+                query = query.Where(m =>
+                    m.Nombre.Contains(texto) ||
+                    (m.Descripcion != null && m.Descripcion.Contains(texto)));
+            }
+
+            var metodosPago = await query
+                .Select(m => new
+                {
+                    m.MetodoPagoId,
+                    m.Nombre,
+                    m.Descripcion,
+                    m.Activo,
+                    m.FechaCreacion,
+                    PagosAsociados = m.Pagos.Count()
+                })
+                .OrderBy(m => m.Nombre)
+                .ToListAsync();
+
+            return Ok(metodosPago);
         }
 
-        _context.Entry(metodopago).State = EntityState.Modified;
-
-        try
+        // GET: api/MetodosPago/5
+        [HttpGet("{metodoPagoId:int}")]
+        public async Task<IActionResult> GetMetodoPago(int metodoPagoId)
         {
+            var metodoPago = await _context.MetodosPago
+                .AsNoTracking()
+                .Where(m => m.MetodoPagoId == metodoPagoId)
+                .Select(m => new
+                {
+                    m.MetodoPagoId,
+                    m.Nombre,
+                    m.Descripcion,
+                    m.Activo,
+                    m.FechaCreacion,
+                    Pagos = m.Pagos.Select(p => new
+                    {
+                        p.PagoId,
+                        p.ReservaId,
+                        p.Monto,
+                        p.Referencia,
+                        p.FechaPago,
+                        EstadoPago = p.EstadoPago == null ? null : p.EstadoPago.Nombre
+                    })
+                })
+                .FirstOrDefaultAsync();
+
+            if (metodoPago == null)
+            {
+                return NotFound("El método de pago no existe.");
+            }
+
+            return Ok(metodoPago);
+        }
+
+        // POST: api/MetodosPago
+        [HttpPost]
+        [Authorize(Roles = "Administrador")]
+        public async Task<IActionResult> CrearMetodoPago([FromBody] CrearMetodoPagoDto dto)
+        {
+            if (!ModelState.IsValid)
+            {
+                return BadRequest(ModelState);
+            }
+
+            var nombre = dto.Nombre.Trim();
+
+            var nombreDuplicado = await _context.MetodosPago
+                .AnyAsync(m => m.Nombre == nombre);
+
+            if (nombreDuplicado)
+            {
+                return BadRequest("Ya existe un método de pago con ese nombre.");
+            }
+
+            var metodoPago = new MetodoPago
+            {
+                Nombre = nombre,
+                Descripcion = string.IsNullOrWhiteSpace(dto.Descripcion) ? null : dto.Descripcion.Trim(),
+                Activo = true,
+                FechaCreacion = DateTime.Now
+            };
+
+            _context.MetodosPago.Add(metodoPago);
             await _context.SaveChangesAsync();
+
+            return CreatedAtAction(
+                nameof(GetMetodoPago),
+                new { metodoPagoId = metodoPago.MetodoPagoId },
+                new
+                {
+                    metodoPago.MetodoPagoId,
+                    metodoPago.Nombre,
+                    metodoPago.Descripcion,
+                    metodoPago.Activo,
+                    metodoPago.FechaCreacion
+                }
+            );
         }
-        catch (DbUpdateConcurrencyException)
+
+        // PUT: api/MetodosPago/5
+        [HttpPut("{metodoPagoId:int}")]
+        [Authorize(Roles = "Administrador")]
+        public async Task<IActionResult> ActualizarMetodoPago(int metodoPagoId, [FromBody] ActualizarMetodoPagoDto dto)
         {
-            if (!MetodoPagoExists(metodopagoid))
+            if (!ModelState.IsValid)
             {
-                return NotFound();
+                return BadRequest(ModelState);
             }
-            else
+
+            var metodoPago = await _context.MetodosPago
+                .FirstOrDefaultAsync(m => m.MetodoPagoId == metodoPagoId);
+
+            if (metodoPago == null)
             {
-                throw;
+                return NotFound("El método de pago no existe.");
             }
+
+            var nombre = dto.Nombre.Trim();
+
+            var nombreDuplicado = await _context.MetodosPago
+                .AnyAsync(m => m.MetodoPagoId != metodoPagoId && m.Nombre == nombre);
+
+            if (nombreDuplicado)
+            {
+                return BadRequest("Ya existe otro método de pago con ese nombre.");
+            }
+
+            metodoPago.Nombre = nombre;
+            metodoPago.Descripcion = string.IsNullOrWhiteSpace(dto.Descripcion) ? null : dto.Descripcion.Trim();
+            metodoPago.Activo = dto.Activo;
+
+            await _context.SaveChangesAsync();
+
+            return Ok(new
+            {
+                metodoPago.MetodoPagoId,
+                metodoPago.Nombre,
+                metodoPago.Descripcion,
+                metodoPago.Activo,
+                metodoPago.FechaCreacion
+            });
         }
 
-        return NoContent();
-    }
-
-    // POST: api/MetodoPago
-    // To protect from overposting attacks, see https://go.microsoft.com/fwlink/?linkid=2123754
-    [HttpPost]
-    public async Task<ActionResult<MetodoPago>> PostMetodoPago(MetodoPago metodopago)
-    {
-        _context.MetodosPago.Add(metodopago);
-        await _context.SaveChangesAsync();
-
-        return CreatedAtAction("GetMetodoPago", new { metodopagoid = metodopago.MetodoPagoId }, metodopago);
-    }
-
-    // DELETE: api/MetodoPago/5
-    [HttpDelete("{metodopagoid}")]
-    public async Task<IActionResult> DeleteMetodoPago(int? metodopagoid)
-    {
-        var metodopago = await _context.MetodosPago.FindAsync(metodopagoid);
-        if (metodopago == null)
+        // PUT: api/MetodosPago/5/activar
+        [HttpPut("{metodoPagoId:int}/activar")]
+        [Authorize(Roles = "Administrador")]
+        public async Task<IActionResult> ActivarMetodoPago(int metodoPagoId)
         {
-            return NotFound();
+            var metodoPago = await _context.MetodosPago
+                .FirstOrDefaultAsync(m => m.MetodoPagoId == metodoPagoId);
+
+            if (metodoPago == null)
+            {
+                return NotFound("El método de pago no existe.");
+            }
+
+            metodoPago.Activo = true;
+            await _context.SaveChangesAsync();
+
+            return Ok("Método de pago activado correctamente.");
         }
 
-        _context.MetodosPago.Remove(metodopago);
-        await _context.SaveChangesAsync();
+        // PUT: api/MetodosPago/5/desactivar
+        [HttpPut("{metodoPagoId:int}/desactivar")]
+        [Authorize(Roles = "Administrador")]
+        public async Task<IActionResult> DesactivarMetodoPago(int metodoPagoId)
+        {
+            var metodoPago = await _context.MetodosPago
+                .FirstOrDefaultAsync(m => m.MetodoPagoId == metodoPagoId);
 
-        return NoContent();
-    }
+            if (metodoPago == null)
+            {
+                return NotFound("El método de pago no existe.");
+            }
 
-    private bool MetodoPagoExists(int? metodopagoid)
-    {
-        return _context.MetodosPago.Any(e => e.MetodoPagoId == metodopagoid);
+            metodoPago.Activo = false;
+            await _context.SaveChangesAsync();
+
+            return Ok("Método de pago desactivado correctamente.");
+        }
+
+        // DELETE: api/MetodosPago/5
+        [HttpDelete("{metodoPagoId:int}")]
+        [Authorize(Roles = "Administrador")]
+        public async Task<IActionResult> DeleteMetodoPago(int metodoPagoId)
+        {
+            var metodoPago = await _context.MetodosPago
+                .FirstOrDefaultAsync(m => m.MetodoPagoId == metodoPagoId);
+
+            if (metodoPago == null)
+            {
+                return NotFound("El método de pago no existe.");
+            }
+
+            var tienePagos = await _context.Pagos
+                .AnyAsync(p => p.MetodoPagoId == metodoPagoId);
+
+            if (tienePagos)
+            {
+                metodoPago.Activo = false;
+                await _context.SaveChangesAsync();
+
+                return Ok("El método de pago tiene pagos asociados. No se eliminó físicamente; fue desactivado.");
+            }
+
+            _context.MetodosPago.Remove(metodoPago);
+            await _context.SaveChangesAsync();
+
+            return NoContent();
+        }
     }
 }

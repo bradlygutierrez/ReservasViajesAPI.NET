@@ -1,99 +1,201 @@
+using AppReservasAPI.Context;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using AppReservasAPI.Models;
-using AppReservasAPI.Context;
 
-[Route("api/[controller]")]
-[ApiController]
-public class HistorialEstadoReservasController : ControllerBase
+namespace AppReservasAPI.Controllers
 {
-    private readonly AppDbContext _context;
-    public HistorialEstadoReservasController(AppDbContext context)
+    [Route("api/[controller]")]
+    [ApiController]
+    [Authorize(Roles = "Administrador")]
+    public class HistorialEstadoReservasController : ControllerBase
     {
-        _context = context;
-    }
+        private readonly AppDbContext _context;
 
-    // GET: api/HistorialEstadoReserva
-    [HttpGet]
-    public async Task<ActionResult<IEnumerable<HistorialEstadoReserva>>> GetHistorialEstadoReserva()
-    {
-        return await _context.HistorialEstadosReserva.ToListAsync();
-    }
-
-    // GET: api/HistorialEstadoReserva/5
-    [HttpGet("{historialid}")]
-    public async Task<ActionResult<HistorialEstadoReserva>> GetHistorialEstadoReserva(long historialid)
-    {
-        var historialestadoreserva = await _context.HistorialEstadosReserva.FindAsync(historialid);
-
-        if (historialestadoreserva == null)
+        public HistorialEstadoReservasController(AppDbContext context)
         {
-            return NotFound();
+            _context = context;
         }
 
-        return historialestadoreserva;
-    }
-
-    // PUT: api/HistorialEstadoReserva/5
-    // To protect from overposting attacks, see https://go.microsoft.com/fwlink/?linkid=2123754
-    [HttpPut("{historialid}")]
-    public async Task<IActionResult> PutHistorialEstadoReserva(long? historialid, HistorialEstadoReserva historialestadoreserva)
-    {
-        if (historialid != historialestadoreserva.HistorialId)
+        // GET: api/HistorialEstadoReservas
+        [HttpGet]
+        public async Task<IActionResult> GetHistorial(
+            [FromQuery] int? reservaId,
+            [FromQuery] int? usuarioId,
+            [FromQuery] int? estadoNuevoId,
+            [FromQuery] DateTime? fechaDesde,
+            [FromQuery] DateTime? fechaHasta)
         {
-            return BadRequest();
-        }
+            var query = _context.HistorialEstadosReserva
+                .AsNoTracking()
+                .AsQueryable();
 
-        _context.Entry(historialestadoreserva).State = EntityState.Modified;
-
-        try
-        {
-            await _context.SaveChangesAsync();
-        }
-        catch (DbUpdateConcurrencyException)
-        {
-            if (!HistorialEstadoReservaExists(historialid))
+            if (reservaId.HasValue)
             {
-                return NotFound();
+                query = query.Where(h => h.ReservaId == reservaId.Value);
             }
-            else
+
+            if (usuarioId.HasValue)
             {
-                throw;
+                query = query.Where(h => h.UsuarioId == usuarioId.Value);
             }
+
+            if (estadoNuevoId.HasValue)
+            {
+                query = query.Where(h => h.EstadoNuevoId == estadoNuevoId.Value);
+            }
+
+            if (fechaDesde.HasValue)
+            {
+                query = query.Where(h => h.FechaCambio >= fechaDesde.Value);
+            }
+
+            if (fechaHasta.HasValue)
+            {
+                query = query.Where(h => h.FechaCambio <= fechaHasta.Value);
+            }
+
+            var historial = await query
+                .Select(h => new
+                {
+                    h.HistorialId,
+                    h.ReservaId,
+                    Reserva = h.Reserva == null ? null : new
+                    {
+                        h.Reserva.ReservaId,
+                        h.Reserva.UsuarioId,
+                        UsuarioReserva = h.Reserva.Usuario == null ? null : h.Reserva.Usuario.Nombre,
+                        h.Reserva.FechaReserva,
+                        h.Reserva.Total
+                    },
+                    h.UsuarioId,
+                    UsuarioCambio = h.Usuario == null ? null : new
+                    {
+                        h.Usuario.UsuarioId,
+                        h.Usuario.Nombre,
+                        h.Usuario.Email
+                    },
+                    h.EstadoAnteriorId,
+                    EstadoAnterior = h.EstadoAnterior == null ? null : h.EstadoAnterior.Nombre,
+                    h.EstadoNuevoId,
+                    EstadoNuevo = h.EstadoNuevo == null ? null : h.EstadoNuevo.Nombre,
+                    h.Motivo,
+                    h.FechaCambio
+                })
+                .OrderByDescending(h => h.FechaCambio)
+                .ToListAsync();
+
+            return Ok(historial);
         }
 
-        return NoContent();
-    }
-
-    // POST: api/HistorialEstadoReserva
-    // To protect from overposting attacks, see https://go.microsoft.com/fwlink/?linkid=2123754
-    [HttpPost]
-    public async Task<ActionResult<HistorialEstadoReserva>> PostHistorialEstadoReserva(HistorialEstadoReserva historialestadoreserva)
-    {
-        _context.HistorialEstadosReserva.Add(historialestadoreserva);
-        await _context.SaveChangesAsync();
-
-        return CreatedAtAction("GetHistorialEstadoReserva", new { historialid = historialestadoreserva.HistorialId }, historialestadoreserva);
-    }
-
-    // DELETE: api/HistorialEstadoReserva/5
-    [HttpDelete("{historialid}")]
-    public async Task<IActionResult> DeleteHistorialEstadoReserva(long? historialid)
-    {
-        var historialestadoreserva = await _context.HistorialEstadosReserva.FindAsync(historialid);
-        if (historialestadoreserva == null)
+        // GET: api/HistorialEstadoReservas/5
+        [HttpGet("{historialId:long}")]
+        public async Task<IActionResult> GetHistorialPorId(long historialId)
         {
-            return NotFound();
+            var historial = await _context.HistorialEstadosReserva
+                .AsNoTracking()
+                .Where(h => h.HistorialId == historialId)
+                .Select(h => new
+                {
+                    h.HistorialId,
+                    h.ReservaId,
+                    Reserva = h.Reserva == null ? null : new
+                    {
+                        h.Reserva.ReservaId,
+                        h.Reserva.UsuarioId,
+                        UsuarioReserva = h.Reserva.Usuario == null ? null : h.Reserva.Usuario.Nombre,
+                        h.Reserva.FechaReserva,
+                        h.Reserva.CantidadPersonas,
+                        h.Reserva.Total
+                    },
+                    h.UsuarioId,
+                    UsuarioCambio = h.Usuario == null ? null : new
+                    {
+                        h.Usuario.UsuarioId,
+                        h.Usuario.Nombre,
+                        h.Usuario.Email
+                    },
+                    h.EstadoAnteriorId,
+                    EstadoAnterior = h.EstadoAnterior == null ? null : h.EstadoAnterior.Nombre,
+                    h.EstadoNuevoId,
+                    EstadoNuevo = h.EstadoNuevo == null ? null : h.EstadoNuevo.Nombre,
+                    h.Motivo,
+                    h.FechaCambio
+                })
+                .FirstOrDefaultAsync();
+
+            if (historial == null)
+            {
+                return NotFound("El registro de historial no existe.");
+            }
+
+            return Ok(historial);
         }
 
-        _context.HistorialEstadosReserva.Remove(historialestadoreserva);
-        await _context.SaveChangesAsync();
+        // GET: api/HistorialEstadoReservas/reserva/5
+        [HttpGet("reserva/{reservaId:int}")]
+        public async Task<IActionResult> GetHistorialPorReserva(int reservaId)
+        {
+            var reservaExiste = await _context.Reservas
+                .AnyAsync(r => r.ReservaId == reservaId);
 
-        return NoContent();
-    }
+            if (!reservaExiste)
+            {
+                return NotFound("La reserva no existe.");
+            }
 
-    private bool HistorialEstadoReservaExists(long? historialid)
-    {
-        return _context.HistorialEstadosReserva.Any(e => e.HistorialId == historialid);
+            var historial = await _context.HistorialEstadosReserva
+                .AsNoTracking()
+                .Where(h => h.ReservaId == reservaId)
+                .Select(h => new
+                {
+                    h.HistorialId,
+                    h.ReservaId,
+                    h.EstadoAnteriorId,
+                    EstadoAnterior = h.EstadoAnterior == null ? null : h.EstadoAnterior.Nombre,
+                    h.EstadoNuevoId,
+                    EstadoNuevo = h.EstadoNuevo == null ? null : h.EstadoNuevo.Nombre,
+                    h.UsuarioId,
+                    UsuarioCambio = h.Usuario == null ? null : h.Usuario.Nombre,
+                    h.Motivo,
+                    h.FechaCambio
+                })
+                .OrderByDescending(h => h.FechaCambio)
+                .ToListAsync();
+
+            return Ok(historial);
+        }
+
+        // GET: api/HistorialEstadoReservas/usuario/5
+        [HttpGet("usuario/{usuarioId:int}")]
+        public async Task<IActionResult> GetHistorialPorUsuario(int usuarioId)
+        {
+            var usuarioExiste = await _context.Usuarios
+                .AnyAsync(u => u.UsuarioId == usuarioId);
+
+            if (!usuarioExiste)
+            {
+                return NotFound("El usuario no existe.");
+            }
+
+            var historial = await _context.HistorialEstadosReserva
+                .AsNoTracking()
+                .Where(h => h.UsuarioId == usuarioId)
+                .Select(h => new
+                {
+                    h.HistorialId,
+                    h.ReservaId,
+                    h.EstadoAnteriorId,
+                    EstadoAnterior = h.EstadoAnterior == null ? null : h.EstadoAnterior.Nombre,
+                    h.EstadoNuevoId,
+                    EstadoNuevo = h.EstadoNuevo == null ? null : h.EstadoNuevo.Nombre,
+                    h.Motivo,
+                    h.FechaCambio
+                })
+                .OrderByDescending(h => h.FechaCambio)
+                .ToListAsync();
+
+            return Ok(historial);
+        }
     }
 }

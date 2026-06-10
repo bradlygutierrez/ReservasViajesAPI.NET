@@ -1,4 +1,5 @@
 using AppReservasAPI.Context;
+using AppReservasAPI.Middleware;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -65,6 +66,7 @@ builder.Services.AddSwaggerGen(options =>
         Version = "v1"
     });
 
+    // JWT Bearer
     options.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
     {
         In = ParameterLocation.Header,
@@ -75,9 +77,20 @@ builder.Services.AddSwaggerGen(options =>
         Scheme = "Bearer"
     });
 
+    // API Key
+    options.AddSecurityDefinition("ApiKey", new OpenApiSecurityScheme
+    {
+        In = ParameterLocation.Header,
+        Description = "Ingrese la API Key.",
+        Name = "X-API-KEY",
+        Type = SecuritySchemeType.ApiKey
+    });
+
+    // Requerir ambos en Swagger
     options.AddSecurityRequirement(document => new()
     {
-        [new OpenApiSecuritySchemeReference("Bearer", document)] = []
+        [new OpenApiSecuritySchemeReference("Bearer", document)] = [],
+        [new OpenApiSecuritySchemeReference("ApiKey", document)] = []
     });
 });
 
@@ -86,7 +99,11 @@ var app = builder.Build();
 app.UseSwagger();
 app.UseSwaggerUI();
 
-//app.UseHttpsRedirection();
+// En desarrollo local podés dejarlo comentado si te daba problema HTTPS.
+// En producción, lo recomendable es usar HTTPS.
+// app.UseHttpsRedirection();
+
+app.UseMiddleware<ApiKeyMiddleware>();
 
 app.UseAuthentication();
 app.UseAuthorization();
