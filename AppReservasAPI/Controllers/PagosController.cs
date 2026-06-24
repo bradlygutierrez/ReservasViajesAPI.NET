@@ -171,22 +171,22 @@ namespace AppReservasAPI.Controllers
 
             var estadoPagado = estadoPago.Nombre.Equals("Pagado", StringComparison.OrdinalIgnoreCase);
 
-            if (estadoPagado && reserva.Total.HasValue)
+            if (estadoPagado)
             {
-                var estadoPagadoId = await _context.EstadosPago
+                var estadoPagoId = await _context.EstadosPago
                     .Where(ep => ep.Nombre == "Pagado")
                     .Select(ep => ep.EstadoPagoId)
                     .FirstOrDefaultAsync();
 
                 var totalPagadoAnterior = await _context.Pagos
-                    .Where(p => p.ReservaId == dto.ReservaId && p.EstadoPagoId == estadoPagadoId)
+                    .Where(p => p.ReservaId == dto.ReservaId && p.EstadoPagoId == estadoPagoId)
                     .SumAsync(p => p.Monto);
 
                 var nuevoTotalPagado = totalPagadoAnterior + dto.Monto;
 
-                if (nuevoTotalPagado > reserva.Total.Value)
+                if (nuevoTotalPagado > reserva.Total)
                 {
-                    return BadRequest($"El pago excede el total de la reserva. Total de reserva: {reserva.Total.Value}, ya pagado: {totalPagadoAnterior}.");
+                    return BadRequest($"El pago excede el total de la reserva. Total: {reserva.Total}, pagado anteriormente: {totalPagadoAnterior}, nuevo pago: {dto.Monto}.");
                 }
             }
 
@@ -246,10 +246,10 @@ namespace AppReservasAPI.Controllers
             }
 
             var pago = await _context.Pagos
-                .Include(p => p.EstadoPago)
-                .Include(p => p.Reserva)
-                    .ThenInclude(r => r.EstadoReserva)
-                .FirstOrDefaultAsync(p => p.PagoId == pagoId);
+    .Include(p => p.EstadoPago)
+    .Include(p => p.Reserva)
+        .ThenInclude(r => r!.EstadoReserva)
+    .FirstOrDefaultAsync(p => p.PagoId == pagoId);
 
             if (pago == null)
             {
@@ -319,7 +319,7 @@ namespace AppReservasAPI.Controllers
 
         private async Task ConfirmarReservaSiEstaPagada(Reserva reserva, decimal montoNuevoPago, int? usuarioId)
         {
-            if (!reserva.Total.HasValue)
+            if (reserva.Total <= 0)
             {
                 return;
             }
@@ -340,7 +340,7 @@ namespace AppReservasAPI.Controllers
 
             var totalPagado = totalPagadoAnterior + montoNuevoPago;
 
-            if (totalPagado < reserva.Total.Value)
+            if (totalPagado < reserva.Total)
             {
                 return;
             }

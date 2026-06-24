@@ -191,6 +191,24 @@ namespace AppReservasAPI.Controllers
                 return BadRequest("El viaje asociado no existe o no está activo.");
             }
 
+            if (disponibilidad.Fecha.Date < DateTime.Today)
+            {
+                return BadRequest("No se puede reservar un viaje cuya fecha de salida ya pasó.");
+            }
+
+            var yaTieneReservaActiva = await _context.Reservas
+                .Include(r => r.EstadoReserva)
+                .AnyAsync(r =>
+                    r.UsuarioId == dto.UsuarioId &&
+                    r.DisponibilidadId == dto.DisponibilidadId &&
+                    r.EstadoReserva != null &&
+                    !r.EstadoReserva.Nombre.Equals("Cancelada"));
+
+            if (yaTieneReservaActiva)
+            {
+                return BadRequest("Ya tenés una reserva activa para esta fecha de viaje.");
+            }
+
             if (disponibilidad.CuposDisponibles < dto.CantidadPersonas)
             {
                 return BadRequest($"No hay cupos suficientes. Cupos disponibles: {disponibilidad.CuposDisponibles}.");
@@ -219,7 +237,6 @@ namespace AppReservasAPI.Controllers
                     FechaReserva = DateTime.Now,
                     CantidadPersonas = dto.CantidadPersonas,
                     PrecioUnitario = precioUnitario,
-                    Total = total,
                     FechaActualizacion = DateTime.Now,
                     Notas = dto.Notas
                 };
