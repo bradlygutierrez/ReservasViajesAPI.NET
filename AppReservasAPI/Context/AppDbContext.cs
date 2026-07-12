@@ -366,6 +366,6 @@ public class AppDbContext : DbContext
             .HasOne(n => n.Reserva)
             .WithMany(r => r.Notificaciones)
             .HasForeignKey(n => n.ReservaId)
-            .OnDelete(DeleteBehavior.Restrict);
+            .OnDelete(DeleteBehavior.Restrict); 
     }
 }

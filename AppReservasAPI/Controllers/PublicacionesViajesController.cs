@@ -488,12 +488,24 @@ public class PublicacionesViajesController : ControllerBase
 
     // PUT: api/PublicacionesViajes/5/estado
     [HttpPut("{viajeId:int}/estado")]
-    public async Task<IActionResult> CambiarEstado(int viajeId, [FromBody] CambiarEstadoPublicacionDto dto)
+    public async Task<IActionResult> CambiarEstado(
+        int viajeId,
+        [FromBody] CambiarEstadoPublicacionDto dto)
     {
         var usuarioId = ObtenerUsuarioId();
+
         if (usuarioId == null)
         {
             return Unauthorized("Token inválido.");
+        }
+
+        if (!dto.Activo && string.IsNullOrWhiteSpace(dto.Motivo))
+        {
+            return BadRequest(new
+            {
+                message = "Debe indicar el motivo por el cual se pausa el viaje.",
+                codigo = "MOTIVO_PAUSA_REQUERIDO"
+            });
         }
 
         var viaje = await _context.Viajes
@@ -505,22 +517,176 @@ public class PublicacionesViajesController : ControllerBase
             return NotFound("El viaje no existe.");
         }
 
-        if (!EsAdministrador() && viaje.PublicadoPorUsuarioId != usuarioId.Value)
+        if (!EsAdministrador() &&
+            viaje.PublicadoPorUsuarioId != usuarioId.Value)
         {
             return Forbid();
         }
 
-        viaje.Activo = dto.Activo;
-        viaje.EstadoPublicacion = dto.Activo ? "Publicado" : "Pausado";
-        viaje.FechaActualizacion = DateTime.Now;
-
-        foreach (var disponibilidad in viaje.Disponibilidades)
+        if (viaje.Activo == dto.Activo)
         {
-            disponibilidad.Activo = dto.Activo;
+            return BadRequest(new
+            {
+                message = dto.Activo
+                    ? "El viaje ya se encuentra publicado."
+                    : "El viaje ya se encuentra pausado.",
+                codigo = "ESTADO_VIAJE_SIN_CAMBIOS"
+            });
         }
 
-        await _context.SaveChangesAsync();
-        return Ok(new { viaje.ViajeId, viaje.Activo, viaje.EstadoPublicacion });
+        await using var transaction =
+            await _context.Database.BeginTransactionAsync();
+
+        try
+        {
+            var ahora = DateTime.Now;
+
+            /*
+             * REACTIVAR VIAJE
+             *
+             * Reactiva el viaje y sus disponibilidades.
+             * Las reservas pausadas no se reactivan automáticamente,
+             * porque cada cliente debe elegir reagendar o solicitar
+             * un reembolso.
+             */
+            if (dto.Activo)
+            {
+                viaje.Activo = true;
+                viaje.EstadoPublicacion = "Publicado";
+                viaje.MotivoPausa = null;
+                viaje.FechaPausa = null;
+                viaje.PausadoPorUsuarioId = null;
+                viaje.FechaActualizacion = ahora;
+
+                foreach (var disponibilidad in viaje.Disponibilidades)
+                {
+                    disponibilidad.Activo = true;
+                }
+
+                await _context.SaveChangesAsync();
+                await transaction.CommitAsync();
+
+                return Ok(new
+                {
+                    viaje.ViajeId,
+                    viaje.Activo,
+                    viaje.EstadoPublicacion,
+                    message = "El viaje fue reactivado correctamente."
+                });
+            }
+
+            /*
+             * PAUSAR VIAJE
+             */
+            var estadoPausada = await _context.EstadosReserva
+                .FirstOrDefaultAsync(e =>
+                    e.Nombre == "Pausada" &&
+                    e.Activo);
+
+            if (estadoPausada == null)
+            {
+                return StatusCode(
+                    StatusCodes.Status500InternalServerError,
+                    new
+                    {
+                        message =
+                            "No se encontró el estado de reserva 'Pausada'.",
+                        codigo = "ESTADO_PAUSADA_NO_CONFIGURADO"
+                    });
+            }
+
+            viaje.Activo = false;
+            viaje.EstadoPublicacion = "Pausado";
+            viaje.MotivoPausa = dto.Motivo!.Trim();
+            viaje.FechaPausa = ahora;
+            viaje.PausadoPorUsuarioId = usuarioId.Value;
+            viaje.FechaActualizacion = ahora;
+
+            foreach (var disponibilidad in viaje.Disponibilidades)
+            {
+                disponibilidad.Activo = false;
+            }
+
+            /*
+             * Buscar todas las reservas del viaje que todavía
+             * pueden ser afectadas por la pausa.
+             */
+            var reservas = await _context.Reservas
+                .Include(r => r.Disponibilidad)
+                .Include(r => r.EstadoReserva)
+                .Where(r =>
+                    r.Disponibilidad != null &&
+                    r.Disponibilidad.ViajeId == viajeId &&
+                    r.EstadoReserva != null &&
+                    r.EstadoReserva.Nombre != "Cancelada" &&
+                    r.EstadoReserva.Nombre != "Reembolsada" &&
+                    r.EstadoReserva.Nombre != "Reembolso solicitado" &&
+                    r.EstadoReserva.Nombre != "Pausada")
+                .ToListAsync();
+
+            foreach (var reserva in reservas)
+            {
+                var estadoAnteriorId = reserva.EstadoReservaId;
+
+                reserva.EstadoReservaId =
+                    estadoPausada.EstadoReservaId;
+
+                reserva.FechaActualizacion = ahora;
+
+                /*
+                 * Registrar el cambio de estado.
+                 */
+                _context.HistorialEstadosReserva.Add(
+                    new HistorialEstadoReserva
+                    {
+                        ReservaId = reserva.ReservaId,
+                        EstadoAnteriorId = estadoAnteriorId,
+                        EstadoNuevoId =
+                            estadoPausada.EstadoReservaId,
+                        UsuarioId = usuarioId.Value,
+                        Motivo = dto.Motivo.Trim(),
+                        FechaCambio = ahora
+                    });
+
+                /*
+                 * Crear notificación para el cliente.
+                 */
+                _context.Notificaciones.Add(
+                    new Notificacion
+                    {
+                        UsuarioId = reserva.UsuarioId,
+                        ViajeId = viaje.ViajeId,
+                        ReservaId = reserva.ReservaId,
+                        Titulo = "Tu viaje fue pausado",
+                        Mensaje =
+                            $"El viaje \"{viaje.Titulo}\" fue pausado. " +
+                            $"Motivo: {dto.Motivo.Trim()} " +
+                            "Puedes reagendar tu reserva o solicitar un reembolso.",
+                        Tipo = "ViajePausado",
+                        Leida = false,
+                        FechaCreacion = ahora
+                    });
+            }
+
+            await _context.SaveChangesAsync();
+            await transaction.CommitAsync();
+
+            return Ok(new
+            {
+                viaje.ViajeId,
+                viaje.Activo,
+                viaje.EstadoPublicacion,
+                viaje.MotivoPausa,
+                viaje.FechaPausa,
+                ReservasAfectadas = reservas.Count,
+                message = "El viaje y sus reservas fueron pausados correctamente."
+            });
+        }
+        catch
+        {
+            await transaction.RollbackAsync();
+            throw;
+        }
     }
 
     private IQueryable<Viaje> QueryViajesBase()
