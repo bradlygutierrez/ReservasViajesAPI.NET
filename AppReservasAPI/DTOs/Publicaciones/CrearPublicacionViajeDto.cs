@@ -38,4 +38,8 @@ public class CrearPublicacionViajeDto
     public DateTime? FechaRetorno { get; set; }
 
     public IFormFile? Imagen { get; set; }
+
+    public List<string> InclusionesJson { get; set; } = new();
+
+    public List<string> ItinerarioJson { get; set; } = new();
 }

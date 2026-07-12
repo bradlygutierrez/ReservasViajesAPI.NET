@@ -1,5 +1,7 @@
 using AppReservasAPI.Context;
 using AppReservasAPI.DTOs.Publicaciones;
+using AppReservasAPI.DTOs.Viajes;
+using System.Text.Json;
 using AppReservasAPI.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -94,12 +96,39 @@ public class PublicacionesViajesController : ControllerBase
     // POST: api/PublicacionesViajes
     [HttpPost]
     [RequestSizeLimit(10_000_000)]
-    public async Task<IActionResult> CrearPublicacion([FromForm] CrearPublicacionViajeDto dto)
+    public async Task<IActionResult> CrearPublicacion(
+        [FromForm] CrearPublicacionViajeDto dto)
     {
         var usuarioId = ObtenerUsuarioId();
+
         if (usuarioId == null)
         {
             return Unauthorized("Token inválido.");
+        }
+
+        // El administrador puede publicar sin certificación.
+        var esAdmin = User.IsInRole("Admin");
+
+        if (!esAdmin)
+        {
+            var agenteCertificado = await _context
+                .AgenteCertificaciones
+                .AnyAsync(c =>
+                    c.UsuarioId == usuarioId.Value &&
+                    c.Estado == "Aprobada" &&
+                    c.Activo);
+
+            if (!agenteCertificado)
+            {
+                return StatusCode(
+                    StatusCodes.Status403Forbidden,
+                    new
+                    {
+                        message =
+                            "Debes ser un agente certificado para publicar viajes.",
+                        codigo = "AGENTE_NO_CERTIFICADO"
+                    });
+            }
         }
 
         if (!ModelState.IsValid)
@@ -112,23 +141,119 @@ public class PublicacionesViajesController : ControllerBase
 
         if (fechaSalida < DateTime.Today)
         {
-            return BadRequest("No se puede publicar un viaje con fecha de salida pasada.");
+            return BadRequest(
+                "No se puede publicar un viaje con fecha de salida pasada.");
         }
 
-        if (fechaRetorno.HasValue && fechaRetorno.Value < fechaSalida)
+        if (fechaRetorno.HasValue &&
+            fechaRetorno.Value < fechaSalida)
         {
-            return BadRequest("La fecha de retorno no puede ser menor que la fecha de salida.");
+            return BadRequest(
+                "La fecha de retorno no puede ser menor que la fecha de salida.");
         }
 
         var tipoExiste = await _context.TiposViaje
-            .AnyAsync(t => t.TipoViajeId == dto.TipoViajeId && t.Activo);
+            .AnyAsync(t =>
+                t.TipoViajeId == dto.TipoViajeId &&
+                t.Activo);
 
         if (!tipoExiste)
         {
-            return BadRequest("El tipo de viaje no existe o no está activo.");
+            return BadRequest(
+                "El tipo de viaje no existe o no está activo.");
+        }
+
+        // Convertir las inclusiones y el itinerario recibidos como JSON.
+        List<ViajeInclusionDto> inclusiones;
+        List<ViajeItinerarioDto> itinerario;
+
+        var opcionesJson = new JsonSerializerOptions
+        {
+            PropertyNameCaseInsensitive = true
+        };
+
+        try
+        {
+            inclusiones = DeserializarListaFlexible<ViajeInclusionDto>(
+                dto.InclusionesJson,
+                opcionesJson);
+
+            itinerario = DeserializarListaFlexible<ViajeItinerarioDto>(
+                dto.ItinerarioJson,
+                opcionesJson);
+        }
+        catch (JsonException)
+        {
+            return BadRequest(new
+            {
+                message =
+                    "El formato de inclusiones o itinerario no es válido.",
+                codigo = "JSON_VIAJE_INVALIDO"
+            });
+        }
+
+        // Validar inclusiones.
+        if (inclusiones.Any(i =>
+                string.IsNullOrWhiteSpace(i.Tipo) ||
+                string.IsNullOrWhiteSpace(i.Titulo)))
+        {
+            return BadRequest(new
+            {
+                message =
+                    "Cada inclusión debe contener un tipo y un título.",
+                codigo = "INCLUSION_INVALIDA"
+            });
+        }
+
+        if (inclusiones.Any(i => i.Orden < 0))
+        {
+            return BadRequest(new
+            {
+                message =
+                    "El orden de las inclusiones no puede ser negativo.",
+                codigo = "ORDEN_INCLUSION_INVALIDO"
+            });
+        }
+
+        // Validar itinerario.
+        if (itinerario.Any(i =>
+                i.Dia <= 0 ||
+                string.IsNullOrWhiteSpace(i.Titulo)))
+        {
+            return BadRequest(new
+            {
+                message =
+                    "Cada elemento del itinerario debe tener un día válido y un título.",
+                codigo = "ITINERARIO_INVALIDO"
+            });
+        }
+
+        if (itinerario.Any(i => i.Orden < 0))
+        {
+            return BadRequest(new
+            {
+                message =
+                    "El orden del itinerario no puede ser negativo.",
+                codigo = "ORDEN_ITINERARIO_INVALIDO"
+            });
+        }
+
+        var diasDuplicados = itinerario
+            .GroupBy(i => i.Dia)
+            .Any(g => g.Count() > 1);
+
+        if (diasDuplicados)
+        {
+            return BadRequest(new
+            {
+                message =
+                    "No se puede registrar más de un itinerario con el mismo número de día.",
+                codigo = "DIA_ITINERARIO_DUPLICADO"
+            });
         }
 
         string? imagenUrl;
+
         try
         {
             imagenUrl = await GuardarImagenAsync(dto.Imagen);
@@ -141,12 +266,14 @@ public class PublicacionesViajesController : ControllerBase
         var paisNombre = Normalizar(dto.Pais);
         var ciudadNombre = Normalizar(dto.Ciudad);
 
-        await using var transaction = await _context.Database.BeginTransactionAsync();
+        await using var transaction =
+            await _context.Database.BeginTransactionAsync();
 
         try
         {
             var pais = await _context.Paises
-                .FirstOrDefaultAsync(p => p.Nombre == paisNombre);
+                .FirstOrDefaultAsync(p =>
+                    p.Nombre == paisNombre);
 
             if (pais == null)
             {
@@ -155,6 +282,7 @@ public class PublicacionesViajesController : ControllerBase
                     Nombre = paisNombre,
                     Activo = true
                 };
+
                 _context.Paises.Add(pais);
                 await _context.SaveChangesAsync();
             }
@@ -164,7 +292,9 @@ public class PublicacionesViajesController : ControllerBase
             }
 
             var ciudad = await _context.Ciudades
-                .FirstOrDefaultAsync(c => c.PaisId == pais.PaisId && c.Nombre == ciudadNombre);
+                .FirstOrDefaultAsync(c =>
+                    c.PaisId == pais.PaisId &&
+                    c.Nombre == ciudadNombre);
 
             if (ciudad == null)
             {
@@ -174,6 +304,7 @@ public class PublicacionesViajesController : ControllerBase
                     Nombre = ciudadNombre,
                     Activo = true
                 };
+
                 _context.Ciudades.Add(ciudad);
                 await _context.SaveChangesAsync();
             }
@@ -185,9 +316,11 @@ public class PublicacionesViajesController : ControllerBase
             var destino = new Destino
             {
                 CiudadId = ciudad.CiudadId,
-                Descripcion = string.IsNullOrWhiteSpace(dto.DestinoDescripcion)
-                    ? dto.Descripcion?.Trim()
-                    : dto.DestinoDescripcion.Trim(),
+                Descripcion =
+                    string.IsNullOrWhiteSpace(
+                        dto.DestinoDescripcion)
+                        ? dto.Descripcion?.Trim()
+                        : dto.DestinoDescripcion.Trim(),
                 Activo = true
             };
 
@@ -195,12 +328,16 @@ public class PublicacionesViajesController : ControllerBase
             await _context.SaveChangesAsync();
 
             var ahora = DateTime.Now;
+
             var viaje = new Viaje
             {
                 TipoViajeId = dto.TipoViajeId,
                 DestinoId = destino.DestinoId,
                 Titulo = dto.Titulo.Trim(),
-                Descripcion = string.IsNullOrWhiteSpace(dto.Descripcion) ? null : dto.Descripcion.Trim(),
+                Descripcion =
+                    string.IsNullOrWhiteSpace(dto.Descripcion)
+                        ? null
+                        : dto.Descripcion.Trim(),
                 Precio = dto.Precio,
                 CuposTotales = dto.CuposTotales,
                 Activo = true,
@@ -212,6 +349,56 @@ public class PublicacionesViajesController : ControllerBase
             };
 
             _context.Viajes.Add(viaje);
+            await _context.SaveChangesAsync();
+
+            // Guardar inclusiones relacionadas con el viaje.
+            foreach (var item in inclusiones)
+            {
+                var inclusion = new ViajeInclusion
+                {
+                    ViajeId = viaje.ViajeId,
+                    Tipo = item.Tipo.Trim(),
+                    Titulo = item.Titulo.Trim(),
+                    Detalle =
+                        string.IsNullOrWhiteSpace(item.Detalle)
+                            ? null
+                            : item.Detalle.Trim(),
+                    Orden = item.Orden,
+                    Activo = true,
+                    FechaCreacion = ahora
+                };
+
+                _context.ViajeInclusiones.Add(inclusion);
+            }
+
+            // Guardar itinerario relacionado con el viaje.
+            foreach (var item in itinerario)
+            {
+                var detalleItinerario =
+                    new ViajeItinerario
+                    {
+                        ViajeId = viaje.ViajeId,
+                        Dia = item.Dia,
+                        Titulo = item.Titulo.Trim(),
+                        Descripcion =
+                            string.IsNullOrWhiteSpace(
+                                item.Descripcion)
+                                ? null
+                                : item.Descripcion.Trim(),
+                        Sitios =
+                            string.IsNullOrWhiteSpace(
+                                item.Sitios)
+                                ? null
+                                : item.Sitios.Trim(),
+                        Orden = item.Orden,
+                        Activo = true,
+                        FechaCreacion = ahora
+                    };
+
+                _context.ViajeItinerarios.Add(
+                    detalleItinerario);
+            }
+
             await _context.SaveChangesAsync();
 
             var disponibilidad = new Disponibilidad
@@ -230,15 +417,73 @@ public class PublicacionesViajesController : ControllerBase
             await transaction.CommitAsync();
 
             var creado = await QueryViajesBase()
-                .FirstAsync(v => v.ViajeId == viaje.ViajeId);
+                .FirstAsync(v =>
+                    v.ViajeId == viaje.ViajeId);
 
-            return CreatedAtAction(nameof(GetMisViajes), new { viajeId = viaje.ViajeId }, ProyectarViaje(creado));
+            return CreatedAtAction(
+                nameof(GetMisViajes),
+                new
+                {
+                    viajeId = viaje.ViajeId
+                },
+                ProyectarViaje(creado));
         }
         catch
         {
             await transaction.RollbackAsync();
             throw;
         }
+    }
+
+    private static List<T> DeserializarListaFlexible<T>(
+    List<string>? valores,
+    JsonSerializerOptions opciones)
+    {
+        var resultado = new List<T>();
+
+        if (valores == null || valores.Count == 0)
+        {
+            return resultado;
+        }
+
+        foreach (var valor in valores)
+        {
+            if (string.IsNullOrWhiteSpace(valor))
+            {
+                continue;
+            }
+
+            var texto = valor.Trim();
+
+            // Permite un arreglo completo:
+            // [{"tipo":"Hotel"}, {"tipo":"Transporte"}]
+            if (texto.StartsWith("["))
+            {
+                var lista = JsonSerializer.Deserialize<List<T>>(
+                    texto,
+                    opciones);
+
+                if (lista != null)
+                {
+                    resultado.AddRange(lista);
+                }
+            }
+            else
+            {
+                // Permite objetos separados:
+                // {"tipo":"Hotel"}
+                var elemento = JsonSerializer.Deserialize<T>(
+                    texto,
+                    opciones);
+
+                if (elemento != null)
+                {
+                    resultado.Add(elemento);
+                }
+            }
+        }
+
+        return resultado;
     }
 
     // PUT: api/PublicacionesViajes/5/estado

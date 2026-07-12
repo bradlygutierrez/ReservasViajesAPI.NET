@@ -97,28 +97,42 @@ public class ViajesController : ControllerBase
             {
                 v.ViajeId,
                 v.TipoViajeId,
-                TipoViaje = v.TipoViaje == null ? null : new
-                {
-                    v.TipoViaje.TipoViajeId,
-                    v.TipoViaje.Nombre,
-                    v.TipoViaje.Descripcion
-                },
-                v.DestinoId,
-                Destino = v.Destino == null ? null : new
-                {
-                    v.Destino.DestinoId,
-                    v.Destino.Descripcion,
-                    Ciudad = v.Destino.Ciudad == null ? null : new
+
+                TipoViaje = v.TipoViaje == null
+                    ? null
+                    : new
                     {
-                        v.Destino.Ciudad.CiudadId,
-                        v.Destino.Ciudad.Nombre,
-                        Pais = v.Destino.Ciudad.Pais == null ? null : new
-                        {
-                            v.Destino.Ciudad.Pais.PaisId,
-                            v.Destino.Ciudad.Pais.Nombre
-                        }
-                    }
-                },
+                        v.TipoViaje.TipoViajeId,
+                        v.TipoViaje.Nombre,
+                        v.TipoViaje.Descripcion
+                    },
+
+                v.DestinoId,
+
+                Destino = v.Destino == null
+                    ? null
+                    : new
+                    {
+                        v.Destino.DestinoId,
+                        v.Destino.Descripcion,
+
+                        Ciudad = v.Destino.Ciudad == null
+                            ? null
+                            : new
+                            {
+                                v.Destino.Ciudad.CiudadId,
+                                v.Destino.Ciudad.Nombre,
+
+                                Pais = v.Destino.Ciudad.Pais == null
+                                    ? null
+                                    : new
+                                    {
+                                        v.Destino.Ciudad.Pais.PaisId,
+                                        v.Destino.Ciudad.Pais.Nombre
+                                    }
+                            }
+                    },
+
                 v.Titulo,
                 v.Descripcion,
                 v.Precio,
@@ -129,6 +143,7 @@ public class ViajesController : ControllerBase
                 v.PublicadoPorUsuarioId,
                 v.FechaCreacion,
                 v.FechaActualizacion,
+
                 Disponibilidades = v.Disponibilidades
                     .OrderBy(d => d.Fecha)
                     .Select(d => new
@@ -138,9 +153,41 @@ public class ViajesController : ControllerBase
                         d.FechaRetorno,
                         d.CuposTotales,
                         d.CuposDisponibles,
-                        CuposOcupados = d.CuposTotales - d.CuposDisponibles,
+                        CuposOcupados =
+                            d.CuposTotales - d.CuposDisponibles,
                         d.Activo
                     })
+                    .ToList(),
+
+                Inclusiones = v.Inclusiones
+                    .Where(i => i.Activo)
+                    .OrderBy(i => i.Orden)
+                    .ThenBy(i => i.ViajeInclusionId)
+                    .Select(i => new
+                    {
+                        i.ViajeInclusionId,
+                        i.Tipo,
+                        i.Titulo,
+                        i.Detalle,
+                        i.Orden
+                    })
+                    .ToList(),
+
+                Itinerario = v.Itinerarios
+                    .Where(i => i.Activo)
+                    .OrderBy(i => i.Dia)
+                    .ThenBy(i => i.Orden)
+                    .ThenBy(i => i.ViajeItinerarioId)
+                    .Select(i => new
+                    {
+                        i.ViajeItinerarioId,
+                        i.Dia,
+                        i.Titulo,
+                        i.Descripcion,
+                        i.Sitios,
+                        i.Orden
+                    })
+                    .ToList()
             })
             .FirstOrDefaultAsync();
 
