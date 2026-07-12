@@ -55,4 +55,23 @@ public class Viaje
     public ICollection<Queja> Quejas { get; set; } = new List<Queja>();
 
     public ICollection<Compartido> Compartidos { get; set; } = new List<Compartido>();
+
+    [StringLength(1000)]
+    public string? MotivoPausa { get; set; }
+
+    public DateTime? FechaPausa { get; set; }
+
+    public int? PausadoPorUsuarioId { get; set; }
+
+    [ForeignKey(nameof(PausadoPorUsuarioId))]
+    public Usuario? PausadoPorUsuario { get; set; }
+
+    public ICollection<ViajeInclusion> Inclusiones { get; set; }
+        = new List<ViajeInclusion>();
+
+    public ICollection<ViajeItinerario> Itinerarios { get; set; }
+        = new List<ViajeItinerario>();
+
+    public ICollection<Notificacion> Notificaciones { get; set; }
+        = new List<Notificacion>();
 }

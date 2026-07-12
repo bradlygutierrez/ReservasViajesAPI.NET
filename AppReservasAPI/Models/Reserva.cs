@@ -49,4 +49,13 @@ public class Reserva
     public ICollection<Queja> Quejas { get; set; } = new List<Queja>();
 
     public ICollection<Compartido> Compartidos { get; set; } = new List<Compartido>();
+
+    public ICollection<ReagendamientoReserva> Reagendamientos { get; set; }
+    = new List<ReagendamientoReserva>();
+
+    public ICollection<SolicitudReembolso> SolicitudesReembolso { get; set; }
+        = new List<SolicitudReembolso>();
+
+    public ICollection<Notificacion> Notificaciones { get; set; }
+        = new List<Notificacion>();
 }

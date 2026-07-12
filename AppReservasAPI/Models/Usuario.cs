@@ -37,5 +37,10 @@ namespace AppReservasAPI.Models
         public ICollection<Reserva> Reservas { get; set; } = new List<Reserva>();
 
         public ICollection<HistorialEstadoReserva> HistorialEstadoReservas { get; set; } = new List<HistorialEstadoReserva>();
+
+        public AgenteCertificacion? AgenteCertificacion { get; set; }
+
+        public ICollection<Notificacion> Notificaciones { get; set; }
+            = new List<Notificacion>();
     }
 }

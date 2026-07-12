@@ -42,6 +42,13 @@ public class AppDbContext : DbContext
     public DbSet<ViajeLike> ViajeLikes { get; set; } = default!;
     public DbSet<Compartido> Compartidos { get; set; } = default!;
 
+    public DbSet<AgenteCertificacion> AgenteCertificaciones { get; set; } = default!;
+    public DbSet<ViajeInclusion> ViajeInclusiones { get; set; } = default!;
+    public DbSet<ViajeItinerario> ViajeItinerarios { get; set; } = default!;
+    public DbSet<ReagendamientoReserva> ReagendamientosReserva { get; set; } = default!;
+    public DbSet<SolicitudReembolso> SolicitudesReembolso { get; set; } = default!;
+    public DbSet<Notificacion> Notificaciones { get; set; } = default!;
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
@@ -257,6 +264,108 @@ public class AppDbContext : DbContext
             .HasOne(c => c.Reserva)
             .WithMany(r => r.Compartidos)
             .HasForeignKey(c => c.ReservaId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<AgenteCertificacion>()
+    .HasOne(a => a.Usuario)
+    .WithOne(u => u.AgenteCertificacion)
+    .HasForeignKey<AgenteCertificacion>(a => a.UsuarioId)
+    .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<AgenteCertificacion>()
+            .HasOne(a => a.RevisadoPorUsuario)
+            .WithMany()
+            .HasForeignKey(a => a.RevisadoPorUsuarioId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<AgenteCertificacion>()
+            .HasIndex(a => a.Cedula)
+            .IsUnique();
+
+        modelBuilder.Entity<AgenteCertificacion>()
+            .HasIndex(a => a.NumeroLicencia)
+            .IsUnique();
+
+        modelBuilder.Entity<ViajeInclusion>()
+            .HasOne(i => i.Viaje)
+            .WithMany(v => v.Inclusiones)
+            .HasForeignKey(i => i.ViajeId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<ViajeItinerario>()
+            .HasOne(i => i.Viaje)
+            .WithMany(v => v.Itinerarios)
+            .HasForeignKey(i => i.ViajeId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<ViajeItinerario>()
+            .HasIndex(i => new { i.ViajeId, i.Dia })
+            .IsUnique();
+
+        modelBuilder.Entity<Viaje>()
+            .HasOne(v => v.PausadoPorUsuario)
+            .WithMany()
+            .HasForeignKey(v => v.PausadoPorUsuarioId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<ReagendamientoReserva>()
+            .HasOne(r => r.Reserva)
+            .WithMany(r => r.Reagendamientos)
+            .HasForeignKey(r => r.ReservaId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<ReagendamientoReserva>()
+            .HasOne(r => r.DisponibilidadAnterior)
+            .WithMany()
+            .HasForeignKey(r => r.DisponibilidadAnteriorId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<ReagendamientoReserva>()
+            .HasOne(r => r.DisponibilidadNueva)
+            .WithMany()
+            .HasForeignKey(r => r.DisponibilidadNuevaId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<ReagendamientoReserva>()
+            .HasOne(r => r.SolicitadoPorUsuario)
+            .WithMany()
+            .HasForeignKey(r => r.SolicitadoPorUsuarioId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<SolicitudReembolso>()
+            .HasOne(s => s.Reserva)
+            .WithMany(r => r.SolicitudesReembolso)
+            .HasForeignKey(s => s.ReservaId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<SolicitudReembolso>()
+            .HasOne(s => s.Usuario)
+            .WithMany()
+            .HasForeignKey(s => s.UsuarioId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<SolicitudReembolso>()
+            .HasOne(s => s.RevisadoPorUsuario)
+            .WithMany()
+            .HasForeignKey(s => s.RevisadoPorUsuarioId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<Notificacion>()
+            .HasOne(n => n.Usuario)
+            .WithMany(u => u.Notificaciones)
+            .HasForeignKey(n => n.UsuarioId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<Notificacion>()
+            .HasOne(n => n.Viaje)
+            .WithMany(v => v.Notificaciones)
+            .HasForeignKey(n => n.ViajeId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<Notificacion>()
+            .HasOne(n => n.Reserva)
+            .WithMany(r => r.Notificaciones)
+            .HasForeignKey(n => n.ReservaId)
             .OnDelete(DeleteBehavior.Restrict);
     }
 }
